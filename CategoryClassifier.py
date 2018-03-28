@@ -56,6 +56,42 @@ class KeyWordClassifier(TransformerMixin):
             'Other':0
         }
         return self
+class KeyWordClassifierSubCats(KeyWordClassifier, TransformerMixin):
+
+    def predict(self, X, y=None, **fit_params):
+        res = []
+        def check4word(w, freqs):
+            if w in freqs.index:
+                return freqs.loc[w].tolist()[0]
+            else:
+                return 0
+        tokenizer = TreebankWordTokenizer()
+        for text in X:
+            tokens    = tokenizer.tokenize(text)
+            cat_freqs = pd.DataFrame(columns = tokens)
+            for w in tokens:
+                cat_freqs.loc['Combat Balance',w] = check4word(w,self.__combat_freqs)
+                cat_freqs.loc['Gameplay Balance',w] = check4word(w,self.__gameplay_freqs)
+                cat_freqs.loc['Matchmaking',w] = check4word(w,self.__matchmaking_freqs)
+            
+            if cat_freqs.apply(sum).sum()==0:
+                res.append(0)
+            else:
+                res.append(self.__classes_nums[cat_freqs.apply(sum,axis = 1).idxmax()])
+        return res
+
+    def fit(self, X, y=None, **fit_params):
+        self.__combat_freqs    = pd.read_excel('keywords/subcats/balance/combat_topwords.xlsx')
+        self.__gameplay_freqs  = pd.read_excel('keywords/subcats/balance/gameplay_topwords.xlsx')
+        self.__matchmaking_freqs = pd.read_excel('keywords/subcats/balance/matchmaking_topwords.xlsx')
+        
+        self.__classes_nums = {
+            'Combat Balance':1,
+            'Gameplay Balance':2,
+            'Matchmaking':3,
+            'Other':0
+        }
+        return self
 
 class CategoryClassifier():
     
@@ -105,13 +141,32 @@ class CategoryClassifier():
         elif model == 'ridge_load':
             with open('ridge_new.pkl', 'rb') as f:
                 self.__model = pickle.load(f)
-
-            
+        self.__balance_model = Pipeline([('text_cleaner', self.__tn), ('classifier', KeyWordClassifierSubCats())])
+        self.__balance_model.fit(X = [])            
+    
     def predict(self, comments):
+        balance_subcats = {
+                1:'Combat Balance',
+                2:'Gameplay Balance',
+                3:'Matchmaking',
+                0:'Undefined'
+                }
         res = []
         for comment in comments:
             res.append(self.__model.predict(comment)[0])
-        return res
+            classes_labels = {
+                1:'Root Category: Balance.\nSubcategory:   %s.' % (balance_subcats[self.__balance_model.predict(comment)[0]]),
+                2:'Root Category: Graphics',
+                3:'Root Category: Bug',
+                4:'Root Category: Advertising',
+                5:'Root Category: Monetization',
+                0:'Root Category: Irrelevant/Other'
+                }
+            print(classes_labels[self.__model.predict(comment)[0]])
+        return res[0]
 if __name__ == '__main__':
-    cat_classifier = CategoryClassifier(model = 'keywords')
-    print(cat_classifier.predict([['i lost my stuff']]))
+    cat_classifier = CategoryClassifier(model = 'ridge_new')
+    while True:
+        review = input()
+        print('\n')
+        cat_classifier.predict([[review]])
