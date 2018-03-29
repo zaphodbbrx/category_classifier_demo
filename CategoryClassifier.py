@@ -10,7 +10,14 @@ from sklearn.feature_extraction.text import CountVectorizer
 import pickle
 
 class KeyWordClassifier(TransformerMixin):
-
+    def __init__(self, categories, keyword_folder = ''):
+        self.__categories = categories
+        self.__keyword_folder = keyword_folder
+        self.__freqs = {}
+        for cat in categories:
+            self.__freqs[cat] = pd.read_excel('keywords/' + keyword_folder + cat + '_topwords.xlsx')
+        
+        
     def predict(self, X, y=None, **fit_params):
         res = []
         def check4word(w, freqs):
@@ -19,20 +26,17 @@ class KeyWordClassifier(TransformerMixin):
             else:
                 return 0
         tokenizer = TreebankWordTokenizer()
+        classes2nums = dict(zip(self.__categories,range(len(self.__categories))))    
         for text in X:
             tokens    = tokenizer.tokenize(text)
             cat_freqs = pd.DataFrame(columns = tokens)
             for w in tokens:
-                cat_freqs.loc['Balance',w]      = check4word(w,self.__balance_freqs)
-                cat_freqs.loc['Graphics',w]     = check4word(w,self.__graphics_freqs)
-                cat_freqs.loc['Bug',w]          = check4word(w,self.__bug_freqs)
-                cat_freqs.loc['Advertising',w]  = check4word(w,self.__ads_freqs)
-                cat_freqs.loc['Monetization',w] = check4word(w,self.__money_freqs)
-            
+                for cat in self.__categories:
+                    cat_freqs.loc[cat,w] = check4word(w,self.__freqs[cat])        
             if cat_freqs.apply(sum).sum()==0:
                 res.append(0)
             else:
-                res.append(self.__classes_nums[cat_freqs.apply(sum,axis = 1).idxmax()])
+                res.append(classes2nums[cat_freqs.apply(sum,axis = 1).idxmax()])
         return res
 
     def fit_predict(self, X, y=None, **fit_params):
@@ -40,59 +44,9 @@ class KeyWordClassifier(TransformerMixin):
         return self.predict(X)
 
     def fit(self, X, y=None, **fit_params):
-        self.__other_freqs    = pd.read_excel('keywords/other_topwords.xlsx')
-        self.__balance_freqs  = pd.read_excel('keywords/balance_topwords.xlsx')
-        self.__graphics_freqs = pd.read_excel('keywords/graphics_topwords.xlsx')
-        self.__bug_freqs      = pd.read_excel('keywords/bug_topwords.xlsx')
-        self.__ads_freqs      = pd.read_excel('keywords/ads_topwords.xlsx')
-        self.__money_freqs    = pd.read_excel('keywords/money_topwords.xlsx')
-        
-        self.__classes_nums = {
-            'Balance':1,
-            'Graphics':2,
-            'Bug':3,
-            'Advertising':4,
-            'Monetization':5,
-            'Other':0
-        }
         return self
-class KeyWordClassifierSubCats(KeyWordClassifier, TransformerMixin):
-
-    def predict(self, X, y=None, **fit_params):
-        res = []
-        def check4word(w, freqs):
-            if w in freqs.index:
-                return freqs.loc[w].tolist()[0]
-            else:
-                return 0
-        tokenizer = TreebankWordTokenizer()
-        for text in X:
-            tokens    = tokenizer.tokenize(text)
-            cat_freqs = pd.DataFrame(columns = tokens)
-            for w in tokens:
-                cat_freqs.loc['Combat Balance',w] = check4word(w,self.__combat_freqs)
-                cat_freqs.loc['Gameplay Balance',w] = check4word(w,self.__gameplay_freqs)
-                cat_freqs.loc['Matchmaking',w] = check4word(w,self.__matchmaking_freqs)
-            
-            if cat_freqs.apply(sum).sum()==0:
-                res.append(0)
-            else:
-                res.append(self.__classes_nums[cat_freqs.apply(sum,axis = 1).idxmax()])
-        return res
-
-    def fit(self, X, y=None, **fit_params):
-        self.__combat_freqs    = pd.read_excel('keywords/subcats/balance/combat_topwords.xlsx')
-        self.__gameplay_freqs  = pd.read_excel('keywords/subcats/balance/gameplay_topwords.xlsx')
-        self.__matchmaking_freqs = pd.read_excel('keywords/subcats/balance/matchmaking_topwords.xlsx')
-        
-        self.__classes_nums = {
-            'Combat Balance':1,
-            'Gameplay Balance':2,
-            'Matchmaking':3,
-            'Other':0
-        }
-        return self
-
+    
+    
 class CategoryClassifier():
     
     def __init__(self, model = 'keywords'):
@@ -122,7 +76,15 @@ class CategoryClassifier():
         
         self.__tn = TextNormalizer()
         if model == 'keywords':
-            self.__model = Pipeline([('text_cleaner', self.__tn), ('classifier', KeyWordClassifier())])
+            categories = [
+                    'other',
+                    'balance',
+                    'graphics',
+                    'bug',
+                    'ads',
+                    'money'
+                    ]
+            self.__model = Pipeline([('text_cleaner', self.__tn), ('classifier', KeyWordClassifier(categories))])
             self.__model.fit(X = [])
         elif model == 'ridge_new':
             self.__model = Pipeline([('text_cleaner', self.__tn), 
@@ -141,7 +103,17 @@ class CategoryClassifier():
         elif model == 'ridge_load':
             with open('ridge_new.pkl', 'rb') as f:
                 self.__model = pickle.load(f)
-        self.__balance_model = Pipeline([('text_cleaner', self.__tn), ('classifier', KeyWordClassifierSubCats())])
+        elif model == 'logit_load':
+            with open('logit.pkl', 'rb') as f:
+                self.__model = pickle.load(f)            
+        subcategories = [
+                'other',
+                'combat',
+                'gameplay',
+                'matchmaking'
+                ]
+            
+        self.__balance_model = Pipeline([('text_cleaner', self.__tn), ('classifier', KeyWordClassifier(keyword_folder = 'subcats/balance/', categories = subcategories))])
         self.__balance_model.fit(X = [])            
     
     def predict(self, comments):
@@ -165,7 +137,7 @@ class CategoryClassifier():
             print(classes_labels[self.__model.predict(comment)[0]])
         return res[0]
 if __name__ == '__main__':
-    cat_classifier = CategoryClassifier(model = 'ridge_new')
+    cat_classifier = CategoryClassifier(model = 'logit_load')
     while True:
         review = input()
         print('\n')
